@@ -3,6 +3,18 @@
 Формат: [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии по
 [SemVer](https://semver.org/lang/ru/).
 
+## [1.2.5] — 2026-10-27
+
+### Changed
+
+- У `deepseek-v4.1-flash` в каталоге теперь все уровни: `none, low, medium, high, xhigh, max` —
+  чтобы пикер Codex выглядел одинаково для всех моделей.
+
+### Note
+
+- У DeepSeek нет градаций размышлений: API принимает `reasoning_effort` и `thinking.budget_tokens`,
+  но игнорирует оба (проверено: длина reasoning не зависит от значения). Поэтому любой уровень кроме
+  `none` означает включённое мышление, а `none` — выключенное.
 ## [1.2.4] — 2026-10-27
 
 ### Fixed

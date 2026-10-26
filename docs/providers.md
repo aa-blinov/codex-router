@@ -21,7 +21,10 @@
 | `deepseek-pro` | `deepseek-v4-pro` |
 
 Reasoning: `thinking: {type: enabled|disabled}`. Оба значения API принимает. Параметр
-`reasoning_effort` DeepSeek молча игнорирует (даже недопустимые значения не вызывают ошибку).
+`reasoning_effort` DeepSeek молча игнорирует (даже недопустимые значения не вызывают ошибку), как и
+`thinking.budget_tokens`: длина размышлений от них не зависит. Поэтому в каталоге у модели есть все
+уровни для единообразия пикера, но реально работают два состояния: `none` — мышление выключено,
+любой другой уровень — включено.
 
 Проверено: `thinking=enabled` → 200, `thinking=disabled` → 200, `reasoning_effort=ultra` → 200.
 

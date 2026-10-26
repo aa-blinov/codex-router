@@ -69,7 +69,7 @@ models.push(modelEntry({
   alias: 'deepseek-v4.1-flash',
   display: 'DeepSeek-V4.1-Flash',
   description: 'DeepSeek via Codex Router (api.deepseek.com).',
-  levels: ['none', 'high', 'xhigh'],
+  levels: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
   priority: 100,
   isDefault: true,
 }));

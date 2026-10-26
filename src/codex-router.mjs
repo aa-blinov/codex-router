@@ -20,7 +20,7 @@ const LOG_DIR = path.join(HERE, 'logs');
 const ROUTE_LOG = path.join(LOG_DIR, 'routes.jsonl');
 const IS_WIN = process.platform === 'win32';
 const INLINE_MARKER = '<]minimax[>[';
-const ROUTER_VERSION = '1.2.4';
+const ROUTER_VERSION = '1.2.5';
 const reasoningByCall = new Map();
 const REASONING_LIMIT = 500;
 
@@ -320,6 +320,8 @@ function toChatRequest(body, prov) {
   const mappedEffort = (prov.effortMap || {})[effort] || 'high';
 
   if (mode === 'thinking') {
+    // У DeepSeek нет градаций: API принимает reasoning_effort и budget_tokens, но игнорирует их.
+    // Поэтому все уровни кроме none означают включённое мышление.
     req.thinking = { type: effort === 'none' ? 'disabled' : 'enabled' };
   } else if (mode === 'effort') {
     req.reasoning_effort = mappedEffort;
