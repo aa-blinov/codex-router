@@ -3,6 +3,16 @@
 Формат: [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии по
 [SemVer](https://semver.org/lang/ru/).
 
+## [1.2.2] — 2026-10-27
+
+### Added
+
+- Поддержка изображений: части `input_image` из Responses переводятся в `image_url` для Chat Completions.
+- Каталог объявляет `deepseek-v4.1-flash`, `minimax-m3.1-flash` и `minimax-m3` мультимодальными.
+
+### Fixed
+
+- Codex отказывался прикреплять изображения: «Эта модель не поддерживает изображения».
 ## [1.2.1] — 2026-10-27
 
 ### Fixed

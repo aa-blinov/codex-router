@@ -37,6 +37,8 @@ function modelEntry({ alias, display, description, levels, priority, isDefault, 
   e.defaultReasoningEffort = defaultLevel;
   e.supported_reasoning_levels = levels.map(l => ({ effort: l, description: `Reasoning effort: ${l}` }));
   e.supportedReasoningEfforts = levels.map(l => ({ reasoningEffort: l, description: `Reasoning effort: ${l}` }));
+  e.input_modalities = ['text', 'image'];
+  e.inputModalities = ['text', 'image'];
   if (contextWindow) {
     e.context_window = contextWindow;
     e.max_context_window = contextWindow;

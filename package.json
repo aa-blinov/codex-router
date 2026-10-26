@@ -1,6 +1,6 @@
 {
   "name": "codex-router",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "private": true,
   "description": "Local bridge that lets Codex use OpenAI, DeepSeek and MiniMax behind one provider",
   "type": "module",

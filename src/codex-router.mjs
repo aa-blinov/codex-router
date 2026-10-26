@@ -173,10 +173,24 @@ function sendJson(res, code, obj) {
 
 // ---------- Responses -> Chat Completions ----------
 
-function textOf(content) {
+function contentOf(content) {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
-  return content.map(p => (p && (p.text ?? p.input_text ?? '')) || '').join('');
+  const parts = [];
+  for (const p of content) {
+    if (!p) continue;
+    const type = p.type || '';
+    if (type === 'input_image' || type === 'image_url') {
+      const url = typeof p.image_url === 'string' ? p.image_url : (p.image_url && p.image_url.url) || p.url;
+      if (url) parts.push({ type: 'image_url', image_url: { url } });
+      continue;
+    }
+    const text = p.text ?? p.input_text ?? '';
+    if (text) parts.push({ type: 'text', text });
+  }
+  if (!parts.length) return '';
+  if (parts.every(x => x.type === 'text')) return parts.map(x => x.text).join('');
+  return parts;
 }
 
 function convertTools(tools) {
@@ -232,7 +246,7 @@ function toChatRequest(body, prov) {
     const t = item.type || 'message';
     if (t === 'message') {
       const role = item.role === 'developer' ? 'system' : item.role;
-      messages.push({ role, content: textOf(item.content) });
+      messages.push({ role, content: contentOf(item.content) });
     } else if (t === 'function_call' || t === 'custom_tool_call') {
       const callId = item.call_id || item.id;
       const args = t === 'custom_tool_call'
