@@ -56,3 +56,16 @@ Reasoning: `thinking: {type: enabled|disabled}`. Оба значения API п�
 3. Добавить запись модели в `New-CatalogEntry` в `scripts/codex-router.ps1`.
 4. Описать контракт здесь, с результатами реальных проверок.
 5. Для ключа — расширить `ValidateSet` у параметра `-Provider`.
+
+### Inline-вызовы инструментов
+
+Иногда MiniMax вместо 	ool_calls присылает вызов обычным текстом:
+
+`
+<]minimax[>[<invoke name="exec_command">]<]minimax[>[<cmd>git status]<]minimax[>[<workdir>E:\work]
+`
+
+Без обработки такой блок попадал в ответ Codex как текст, и инструмент не выполнялся. Мост
+распознаёт маркер <]minimax[>[, собирает параметры и отдаёт нормальный unction_call
+(или custom_tool_call для freeform-инструментов). Маркеры в текст ответа не попадают; если
+разобрать блок не удалось, они просто вырезаются.

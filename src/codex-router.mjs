@@ -19,6 +19,18 @@ const CFG_PATH = path.join(HERE, 'codex-router.config.json');
 const LOG_DIR = path.join(HERE, 'logs');
 const ROUTE_LOG = path.join(LOG_DIR, 'routes.jsonl');
 const IS_WIN = process.platform === 'win32';
+const INLINE_MARKER = '<]minimax[>[';
+
+function coerceValue(raw) {
+  const v = String(raw).replace(/\]\s*$/, '').trim();
+  if (/^-?\d+$/.test(v)) return Number(v);
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  if (v.startsWith('[') || v.startsWith('{')) {
+    try { return JSON.parse(v); } catch { return v; }
+  }
+  return v;
+}
 const VAULT_PATH = path.join(HERE, IS_WIN ? 'keys.dpapi' : 'keys.json');
 
 const DEFAULTS = {
@@ -298,6 +310,9 @@ class Emitter {
     this.text = null;
     this.tool = null;
     this.usage = null;
+    this.textBuffer = '';
+    this.inlineToolText = null;
+    this.customNames = new Set();
   }
 
   send(type, payload) {
@@ -340,12 +355,73 @@ class Emitter {
     return this.text;
   }
 
-  textDelta(t) {
+  emitText(t) {
     if (!t) return;
     const ctx = this.ensureText();
     const idx = this.output.indexOf(ctx.item);
     ctx.item.__text = (ctx.item.__text || '') + t;
     this.send('response.output_text.delta', { item_id: ctx.item.id, output_index: idx, content_index: 0, delta: t });
+  }
+
+  textDelta(t) {
+    if (!t) return;
+    if (this.inlineToolText !== null) { this.inlineToolText += t; return; }
+    this.textBuffer += t;
+    const at = this.textBuffer.indexOf(INLINE_MARKER);
+    if (at >= 0) {
+      const before = this.textBuffer.slice(0, at);
+      if (before) this.emitText(before);
+      this.inlineToolText = this.textBuffer.slice(at);
+      this.textBuffer = '';
+      return;
+    }
+    if (this.textBuffer.length > 400) {
+      const ready = this.textBuffer.slice(0, -40);
+      this.textBuffer = this.textBuffer.slice(-40);
+      if (ready) this.emitText(ready);
+    }
+  }
+
+  flushText() {
+    if (this.textBuffer) {
+      this.emitText(this.textBuffer);
+      this.textBuffer = '';
+    }
+  }
+
+  parseInlineTools() {
+    const raw = this.inlineToolText || '';
+    this.inlineToolText = null;
+    const parts = raw.split(INLINE_MARKER)
+      .map(s => s.replace(/^\]/, '').trim())
+      .filter(Boolean);
+    const calls = [];
+    let current = null;
+    for (const part of parts) {
+      const inv = /^<invoke\s+name="([^"]+)">/i.exec(part);
+      if (inv) {
+        current = { name: inv[1], params: {} };
+        calls.push(current);
+        continue;
+      }
+      const prm = /^<([a-zA-Z_][\w-]*)>([\s\S]*)$/.exec(part);
+      if (prm && current) current.params[prm[1]] = coerceValue(prm[2]);
+    }
+    return calls;
+  }
+
+  emitInlineTools(calls) {
+    for (const call of calls) {
+      const isCustom = this.customNames && this.customNames.has(call.name);
+      this.startTool('call_' + Math.random().toString(36).slice(2, 12), call.name, isCustom);
+      if (isCustom) {
+        const first = Object.values(call.params)[0];
+        this.toolDelta(typeof first === 'string' ? first : JSON.stringify(call.params));
+      } else {
+        this.toolDelta(JSON.stringify(call.params));
+      }
+      this.finishTool();
+    }
   }
 
   startTool(callId, name, isCustom) {
@@ -400,6 +476,13 @@ class Emitter {
 
   finish(status = 'completed', error = null) {
     this.finishTool();
+    if (!error && this.inlineToolText !== null) {
+      const calls = this.parseInlineTools();
+      if (calls.length) this.emitInlineTools(calls);
+      else if (this.inlineToolText) this.emitText(this.inlineToolText.replaceAll(INLINE_MARKER, ''));
+      this.inlineToolText = null;
+    }
+    this.flushText();
     this.finishText();
     const resp = this.skeleton(status);
     resp.output = this.output.map(i => { const c = Object.assign({}, i); delete c.__text; return c; });
@@ -425,6 +508,7 @@ function chatStream(body, res, providerId) {
 
   const { req, customNames, upstreamModel } = toChatRequest(body, prov);
   const em = new Emitter(res, model);
+  em.customNames = customNames;
 
   const payload = Buffer.from(JSON.stringify(req));
   const base = new URL(prov.baseUrl);

@@ -94,6 +94,15 @@ const fake = http.createServer((req, res) => {
       return res.end(JSON.stringify({ error: { message: 'usage limit reached' } }));
     }
 
+    if (upstream.mode === 'inline') {
+      const text = '<]minimax[>[<invoke name="exec_command">]<]minimax[>[<cmd>git status]<]minimax[>[<workdir>/tmp/work]<]minimax[>[<yield_time_ms>120000]';
+      return sse(res, [
+        chunk({ role: 'assistant', content: '' }),
+        chunk({ content: text }),
+        chunk({}, 'stop'),
+      ]);
+    }
+
     if (upstream.mode === 'tool') {
       return sse(res, [
         chunk({ role: 'assistant', content: '' }),
@@ -215,6 +224,17 @@ async function main() {
     const m3 = upstream.bodies[0].body;
     check('minimax m3: high → reasoning_effort', m3.reasoning_effort === 'high');
     check('minimax m3: high → reasoning_split', m3.reasoning_split === true);
+
+    // 6b. inline-вызовы MiniMax превращаются в function_call
+    upstream.mode = 'inline';
+    const inline = await post({
+      model: 'minimax-m3.1-flash', stream: true, input: msg('run'),
+      tools: [{ type: 'function', name: 'exec_command', description: 'shell', parameters: { type: 'object', properties: {} } }],
+      tool_choice: 'auto',
+    });
+    check('inline: вызов разобран', inline.text.includes('"name":"exec_command"'), inline.text.slice(0, 200));
+    check('inline: аргументы собраны', inline.text.includes('git status'));
+    check('inline: маркер не утёк в текст', !inline.text.includes('minimax['));
 
     // 7. 429 от OpenAI → переход в DeepSeek
     upstream.mode = 'text';

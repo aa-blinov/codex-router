@@ -3,6 +3,17 @@
 Формат: [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии по
 [SemVer](https://semver.org/lang/ru/).
 
+## [1.2.1] — 2026-10-27
+
+### Fixed
+
+- MiniMax иногда присылает вызов инструмента обычным текстом в формате
+  `<]minimax[>[<invoke name="...">]<]minimax[>[<param>value`. Мост теперь распознаёт такие блоки,
+  превращает их в `function_call`/`custom_tool_call` и не пропускает маркеры в ответ Codex.
+
+### Added
+
+- Тест на inline-формат вызова (всего 19 проверок).
 ## [1.2.0] — 2026-10-26
 
 ### Added
