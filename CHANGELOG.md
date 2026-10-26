@@ -3,6 +3,14 @@
 Формат: [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии по
 [SemVer](https://semver.org/lang/ru/).
 
+## [1.2.4] — 2026-10-27
+
+### Fixed
+
+- DeepSeek в thinking-режиме требует `reasoning_content` у **любого** assistant-сообщения в истории,
+  а не только у сообщений с `tool_calls`. Мост теперь проставляет поле всем assistant-сообщениям
+  (известный reasoning или пустая строка). Это убирает 400 «The easoning_content in the thinking
+  mode must be passed back to the API» на длинных сессиях с десятками вызовов инструментов.
 ## [1.2.3] — 2026-10-27
 
 ### Fixed

@@ -242,6 +242,9 @@ function convertTools(tools) {
 
 function toChatRequest(body, prov) {
   const items = body.input || [];
+  const effort = body.reasoning?.effort || null;
+  const isDeepSeek = /deepseek/i.test(prov.baseUrl || '');
+  const needReasoning = isDeepSeek && effort !== 'none';
 
   const outputs = new Map();
   for (const it of items) {
@@ -259,7 +262,9 @@ function toChatRequest(body, prov) {
     const t = item.type || 'message';
     if (t === 'message') {
       const role = item.role === 'developer' ? 'system' : item.role;
-      messages.push({ role, content: contentOf(item.content) });
+      const msg = { role, content: contentOf(item.content) };
+      if (needReasoning && role === 'assistant') msg.reasoning_content = '';
+      messages.push(msg);
     } else if (t === 'function_call' || t === 'custom_tool_call') {
       const callId = item.call_id || item.id;
       const args = t === 'custom_tool_call'
@@ -270,11 +275,14 @@ function toChatRequest(body, prov) {
         content: null,
         tool_calls: [{ id: callId, type: 'function', function: { name: item.name, arguments: args } }],
       };
-      const isDeepSeek = /deepseek/i.test(prov.baseUrl || '');
-      const effort = body.reasoning && body.reasoning.effort;
       const known = reasoningByCall.get(callId);
-      if (known !== undefined) assistantMsg.reasoning_content = known;
-      else if (isDeepSeek && effort && effort !== 'none') { assistantMsg.reasoning_content = ''; missingReasoning = true; }
+      if (isDeepSeek) {
+        // DeepSeek требует наличие поля reasoning_content у assistant+tool_calls,
+        // даже если размышлений не было: пустая строка принимается.
+        if (needReasoning) assistantMsg.reasoning_content = known !== undefined ? known : '';
+      } else if (known !== undefined) {
+        assistantMsg.reasoning_content = known;
+      }
       messages.push(assistantMsg);
       if (outputs.has(callId)) {
         messages.push({ role: 'tool', tool_call_id: callId, content: outputs.get(callId) });
@@ -292,12 +300,7 @@ function toChatRequest(body, prov) {
     }
   }
 
-  if (missingReasoning) {
-    for (const m of messages) if (m.reasoning_content === '') delete m.reasoning_content;
-  }
-
   const { tools, customNames } = convertTools(body.tools);
-  const effort = body.reasoning?.effort || null;
   const upstreamModel = prov.modelMap[String(body.model).toLowerCase()] || prov.defaultModel;
 
   const req = {
@@ -583,6 +586,12 @@ function chatStream(body, res, providerId) {
       r.on('end', () => {
         const text = Buffer.concat(chunks).toString('utf8').slice(0, 2000);
         log({ t: new Date().toISOString(), model, upstream: upstreamModel, target: providerId, keySource: source, status: r.statusCode, ms: Date.now() - started, error: text.slice(0, 200) });
+        if (cfg.debugDump) {
+          try {
+            fs.mkdirSync(LOG_DIR, { recursive: true });
+            fs.writeFileSync(path.join(LOG_DIR, 'failed-' + Date.now() + '.json'), JSON.stringify({ provider: providerId, status: r.statusCode, error: text.slice(0, 500), req }));
+          } catch (e) { if (cfg.debugDump) log({ t: new Date().toISOString(), debug: 'dump-fail-error', error: e.message }); }
+        }
         let parsed = null;
         try { parsed = JSON.parse(text); } catch {}
         sendJson(res, r.statusCode, parsed || { error: { message: String(text || ('upstream HTTP ' + r.statusCode)) } });
