@@ -3,6 +3,13 @@
 Формат: [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии по
 [SemVer](https://semver.org/lang/ru/).
 
+## [1.2.3] — 2026-10-27
+
+### Fixed
+
+- DeepSeek в thinking-режиме отвергал историю с сообщением `The easoning_content in the thinking mode must be passed back`.
+  Теперь мост запоминает reasoning каждого хода по `call_id` и возвращает его в assistant-сообщениях с `tool_calls`.
+- Если провайдер не прислал reasoning для хода, запрос уходит с `thinking: disabled` вместо пустого поля.
 ## [1.2.2] — 2026-10-27
 
 ### Added

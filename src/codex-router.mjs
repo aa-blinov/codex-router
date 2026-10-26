@@ -20,6 +20,18 @@ const LOG_DIR = path.join(HERE, 'logs');
 const ROUTE_LOG = path.join(LOG_DIR, 'routes.jsonl');
 const IS_WIN = process.platform === 'win32';
 const INLINE_MARKER = '<]minimax[>[';
+const ROUTER_VERSION = '1.2.3';
+const reasoningByCall = new Map();
+const REASONING_LIMIT = 500;
+
+function rememberReasoning(callId, text) {
+  if (!callId) return;
+  reasoningByCall.set(callId, text);
+  if (reasoningByCall.size > REASONING_LIMIT) {
+    const oldest = reasoningByCall.keys().next().value;
+    reasoningByCall.delete(oldest);
+  }
+}
 
 function coerceValue(raw) {
   const v = String(raw).replace(/\]\s*$/, '').trim();
@@ -240,6 +252,7 @@ function toChatRequest(body, prov) {
 
   const messages = [];
   const consumed = new Set();
+  let missingReasoning = false;
   if (body.instructions) messages.push({ role: 'system', content: body.instructions });
 
   for (const item of items) {
@@ -252,11 +265,17 @@ function toChatRequest(body, prov) {
       const args = t === 'custom_tool_call'
         ? JSON.stringify({ input: item.input || '' })
         : (item.arguments || '{}');
-      messages.push({
+      const assistantMsg = {
         role: 'assistant',
         content: null,
         tool_calls: [{ id: callId, type: 'function', function: { name: item.name, arguments: args } }],
-      });
+      };
+      const isDeepSeek = /deepseek/i.test(prov.baseUrl || '');
+      const effort = body.reasoning && body.reasoning.effort;
+      const known = reasoningByCall.get(callId);
+      if (known !== undefined) assistantMsg.reasoning_content = known;
+      else if (isDeepSeek && effort && effort !== 'none') { assistantMsg.reasoning_content = ''; missingReasoning = true; }
+      messages.push(assistantMsg);
       if (outputs.has(callId)) {
         messages.push({ role: 'tool', tool_call_id: callId, content: outputs.get(callId) });
         consumed.add(callId);
@@ -271,6 +290,10 @@ function toChatRequest(body, prov) {
         consumed.add(item.call_id);
       }
     }
+  }
+
+  if (missingReasoning) {
+    for (const m of messages) if (m.reasoning_content === '') delete m.reasoning_content;
   }
 
   const { tools, customNames } = convertTools(body.tools);
@@ -325,6 +348,7 @@ class Emitter {
     this.tool = null;
     this.usage = null;
     this.textBuffer = '';
+    this.reasoningText = '';
     this.inlineToolText = null;
     this.customNames = new Set();
   }
@@ -446,6 +470,9 @@ class Emitter {
     const outputIndex = this.output.length;
     this.output.push(item);
     this.tool = { item, isCustom, buffer: '', outputIndex };
+    (this.toolCallIds = this.toolCallIds || []).push(callId);
+    rememberReasoning(callId, this.reasoningText);
+    if (cfg.debugDump) log({ t: new Date().toISOString(), debug: 'tool-start', callId, reasoningLen: this.reasoningText.length });
     this.send('response.output_item.added', { output_index: outputIndex, item });
   }
 
@@ -489,6 +516,10 @@ class Emitter {
   }
 
   finish(status = 'completed', error = null) {
+    if (this.toolCallIds && this.toolCallIds.length) {
+      for (const id of this.toolCallIds) rememberReasoning(id, this.reasoningText);
+      if (cfg.debugDump) log({ t: new Date().toISOString(), debug: 'stream-end', calls: this.toolCallIds.length, reasoningLen: this.reasoningText.length });
+    }
     this.finishTool();
     if (!error && this.inlineToolText !== null) {
       const calls = this.parseInlineTools();
@@ -525,6 +556,12 @@ function chatStream(body, res, providerId) {
   em.customNames = customNames;
 
   const payload = Buffer.from(JSON.stringify(req));
+  if (cfg.debugDump) {
+    try {
+      fs.mkdirSync(LOG_DIR, { recursive: true });
+      fs.writeFileSync(path.join(LOG_DIR, 'last-upstream.json'), JSON.stringify(req));
+    } catch (e) { if (cfg.debugDump) log({ t: new Date().toISOString(), debug: 'dump-up-failed', error: e.message }); }
+  }
   const base = new URL(prov.baseUrl);
   const lib = base.protocol === 'https:' ? https : http;
 
@@ -577,6 +614,7 @@ function chatStream(body, res, providerId) {
         const choice = obj.choices && obj.choices[0];
         if (!choice) continue;
         const d = choice.delta || {};
+        if (d.reasoning_content) em.reasoningText += d.reasoning_content;
         if (d.content) em.textDelta(d.content);
         if (Array.isArray(d.tool_calls)) {
           for (const tc of d.tool_calls) {
@@ -669,7 +707,7 @@ http.createServer((req, res) => {
       };
     }
     return sendJson(res, 200, {
-      ok: true, name: 'codex-router', platform: process.platform, secrets: { file: VAULT_PATH, kind: IS_WIN ? 'dpapi' : 'file-0600' }, port: cfg.port, providers,
+      ok: true, name: 'codex-router', version: ROUTER_VERSION, platform: process.platform, secrets: { file: VAULT_PATH, kind: IS_WIN ? 'dpapi' : 'file-0600' }, port: cfg.port, providers,
       openai: { base: cfg.openai.baseUrl + cfg.openai.prefix, auth: 'chatgpt passthrough' },
     });
   }
@@ -689,6 +727,13 @@ http.createServer((req, res) => {
   req.on('error', () => {});
   req.on('end', () => {
     const payload = Buffer.concat(chunks);
+    if (cfg.debugDump) {
+      try {
+        fs.mkdirSync(LOG_DIR, { recursive: true });
+        fs.writeFileSync(path.join(LOG_DIR, 'last-request.json'), payload.toString('utf8'));
+        log({ t: new Date().toISOString(), debug: 'request-dumped' });
+      } catch (e) { if (cfg.debugDump) log({ t: new Date().toISOString(), debug: 'dump-in-failed', error: e.message }); }
+    }
     let body = null;
     if (payload.length && /json/.test(req.headers['content-type'] || '')) {
       try { body = JSON.parse(payload.toString('utf8')); } catch {}

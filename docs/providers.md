@@ -81,3 +81,13 @@ Reasoning: `thinking: {type: enabled|disabled}`. Оба значения API п�
 
 Мост переводит части `input_image` из Responses в `image_url`, а каталог помечает модели как
 `input_modalities: ["text", "image"]` — без этого Codex отказывается прикреплять картинки.
+## Reasoning в истории
+
+DeepSeek в thinking-режиме требует, чтобы assistant-сообщения с `tool_calls` возвращались вместе с
+`reasoning_content`. Без него API отвечает 400:
+
+> The `reasoning_content` in the thinking mode must be passed back to the API.
+
+Мост запоминает reasoning каждого хода по `call_id` (до 500 записей) и подставляет его при сборке
+истории. Если провайдер почему-то не прислал reasoning для хода, такой запрос уходит с
+`thinking: {type: disabled}`, чтобы не ломать цепочку инструментов.
