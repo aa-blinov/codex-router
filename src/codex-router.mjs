@@ -20,7 +20,7 @@ const LOG_DIR = path.join(HERE, 'logs');
 const ROUTE_LOG = path.join(LOG_DIR, 'routes.jsonl');
 const IS_WIN = process.platform === 'win32';
 const INLINE_MARKER = '<]minimax[>[';
-const ROUTER_VERSION = '1.2.3';
+const ROUTER_VERSION = '1.2.4';
 const reasoningByCall = new Map();
 const REASONING_LIMIT = 500;
 
