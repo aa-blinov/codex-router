@@ -1,0 +1,58 @@
+# Провайдеры
+
+## Сводка
+
+| id | Префикс модели | База | Ключ | Reasoning |
+|---|---|---|---|---|
+| `deepseek` | `deepseek-*` | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` или хранилище | `thinking` |
+| `minimax` | `minimax-*` | `https://api.minimax.io` | `MINIMAX_API_KEY` или хранилище | `reasoning_effort` |
+| OpenAI | всё остальное | `https://chatgpt.com/backend-api/codex` | токен Codex | как просит Codex |
+
+## DeepSeek
+
+Модели API: `deepseek-flash`, `deepseek-v4-pro`. Остальные имена — алиасы моста:
+
+| Алиас в Codex | Что уходит в API |
+|---|---|
+| `deepseek-v4.1-flash` | `deepseek-flash` |
+| `deepseek-v4-flash` | `deepseek-flash` |
+| `deepseek-flash` | `deepseek-flash` |
+| `deepseek-v4-pro` | `deepseek-v4-pro` |
+| `deepseek-pro` | `deepseek-v4-pro` |
+
+Reasoning: `thinking: {type: enabled|disabled}`. Оба значения API принимает. Параметр
+`reasoning_effort` DeepSeek молча игнорирует (даже недопустимые значения не вызывают ошибку).
+
+Проверено: `thinking=enabled` → 200, `thinking=disabled` → 200, `reasoning_effort=ultra` → 200.
+
+## MiniMax
+
+Модели: `MiniMax-M3.1-Flash`, `MiniMax-M3`, `MiniMax-M2.7`, `MiniMax-M2.7-highspeed`, `MiniMax-M2.5`,
+`MiniMax-M2.1`, `MiniMax-M2`. В каталоге Codex опубликованы первые две.
+
+### MiniMax-M3.1-Flash
+
+- `reasoning_effort`: `low`, `medium`, `high`, `xhigh`, `max`.
+- `none` запрещён: `requires adaptive thinking; reasoning effort none is not allowed` (400).
+- `thinking.type = disabled` тоже 400.
+- Мост переводит `none → low`, остальные уровни как есть.
+
+### MiniMax-M3
+
+- `thinking.type` принимает только `adaptive` и `disabled` (`enabled` → 400).
+- Без `reasoning_split: true` размышления приходят прямо в `content` как `<think>…</think>`.
+- `reasoning_effort`: `low`, `medium`, `high`, `xhigh`, `max`; `none` не падает, но и не отключает
+  мышление.
+- Мост использует режим `toggle+effort`: при `effort = none` отправляет `thinking: {type: disabled}`,
+  иначе `reasoning_effort` плюс `reasoning_split: true`.
+- В каталоге у M3 поэтому есть уровень `none`, у M3.1-Flash его нет.
+
+## Как добавить провайдера
+
+1. Добавить запись в `DEFAULTS.providers` в `src/codex-router.mjs`: `baseUrl`, `match`, `keyEnv`,
+   `modelMap`, `defaultModel`, `reasoning`.
+2. Если у провайдера нестандартный контракт reasoning — добавить ветку в `toChatRequest` или
+   per-model запись в `modelReasoning`.
+3. Добавить запись модели в `New-CatalogEntry` в `scripts/codex-router.ps1`.
+4. Описать контракт здесь, с результатами реальных проверок.
+5. Для ключа — расширить `ValidateSet` у параметра `-Provider`.

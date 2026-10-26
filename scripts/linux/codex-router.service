@@ -1,0 +1,15 @@
+[Unit]
+Description=Codex Router — local bridge for OpenAI, DeepSeek and MiniMax
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=__NODE__ __ROUTER__
+WorkingDirectory=__INSTALL_DIR__
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target

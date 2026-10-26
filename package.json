@@ -1,0 +1,16 @@
+{
+  "name": "codex-router",
+  "version": "1.2.0",
+  "private": true,
+  "description": "Local bridge that lets Codex use OpenAI, DeepSeek and MiniMax behind one provider",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/codex-router.mjs",
+    "check": "node --check src/codex-router.mjs && node --check tests/smoke.mjs",
+    "test": "node tests/smoke.mjs"
+  }
+}

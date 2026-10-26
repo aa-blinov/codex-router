@@ -1,0 +1,20 @@
+# секреты и состояние
+keys.dpapi
+secret.dpapi
+*.dpapi
+.env
+.env.*
+
+# рантайм
+logs/
+*.log
+*.bak
+*.tmp
+node_modules/
+coverage/
+.DS_Store
+Thumbs.db
+
+# редакторы
+.vscode/
+.idea/
