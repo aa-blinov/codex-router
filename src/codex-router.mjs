@@ -821,7 +821,7 @@ http.createServer((req, res) => {
       };
     }
     return sendJson(res, 200, {
-      ok: true, name: 'codex-router', version: ROUTER_VERSION, platform: process.platform, secrets: { file: VAULT_PATH, kind: IS_WIN ? 'dpapi' : 'file-0600' }, port: cfg.port, providers,
+      ok: true, name: 'codex-router', version: ROUTER_VERSION, platform: process.platform, tokenizer: tokenCalibration, secrets: { file: VAULT_PATH, kind: IS_WIN ? 'dpapi' : 'file-0600' }, port: cfg.port, providers,
       openai: { base: cfg.openai.baseUrl + cfg.openai.prefix, auth: 'chatgpt passthrough' },
     });
   }
