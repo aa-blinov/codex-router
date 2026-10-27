@@ -55,6 +55,8 @@ response.completed
 ```
 
 Для инструментов — `response.function_call_arguments.*` или `response.custom_tool_call_input.*`.
+Размышления провайдера (`reasoning_content`) идут отдельным элементом `reasoning` с событиями
+`response.reasoning_summary_part.added`, `response.reasoning_summary_text.delta` и `...done`.
 
 ## Два дефекта протокола, которые пришлось закрыть
 

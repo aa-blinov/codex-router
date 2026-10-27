@@ -3,6 +3,18 @@
 Формат: [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии по
 [SemVer](https://semver.org/lang/ru/).
 
+## [1.2.6] — 2026-10-27
+
+### Added
+
+- Размышления моделей теперь видны в Codex: мост отдаёт их как `reasoning`-элемент с
+  `reasoning_summary_text`-дельтой. Раньше `reasoning_content` из потока провайдера просто
+  отбрасывался.
+
+### Note
+
+- DeepSeek и MiniMax присылают размышления отдельным полем; теперь они попадают в интерфейс как
+  блок «thinking». У MiniMax-M3 без `reasoning_split` размышления остаются в тексте ответа.
 ## [1.2.5] — 2026-10-27
 
 ### Changed

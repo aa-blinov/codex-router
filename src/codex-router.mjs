@@ -20,7 +20,7 @@ const LOG_DIR = path.join(HERE, 'logs');
 const ROUTE_LOG = path.join(LOG_DIR, 'routes.jsonl');
 const IS_WIN = process.platform === 'win32';
 const INLINE_MARKER = '<]minimax[>[';
-const ROUTER_VERSION = '1.2.5';
+const ROUTER_VERSION = '1.2.6';
 const reasoningByCall = new Map();
 const REASONING_LIMIT = 500;
 
@@ -354,6 +354,7 @@ class Emitter {
     this.usage = null;
     this.textBuffer = '';
     this.reasoningText = '';
+    this.reasoningItem = null;
     this.inlineToolText = null;
     this.customNames = new Set();
   }
@@ -423,6 +424,41 @@ class Emitter {
       this.textBuffer = this.textBuffer.slice(-40);
       if (ready) this.emitText(ready);
     }
+  }
+
+  reasoningDelta(text) {
+    if (!text) return;
+    if (!this.reasoningItem) {
+      const item = { type: 'reasoning', id: 'rs_' + Math.random().toString(36).slice(2, 16), summary: [], status: 'in_progress' };
+      this.reasoningItem = item;
+      this.output.push(item);
+      const outputIndex = this.output.length - 1;
+      this.send('response.output_item.added', { output_index: outputIndex, item });
+      this.send('response.reasoning_summary_part.added', {
+        item_id: item.id, output_index: outputIndex, summary_index: 0,
+        part: { type: 'summary_text', text: '' },
+      });
+    }
+    const idx = this.output.indexOf(this.reasoningItem);
+    this.send('response.reasoning_summary_text.delta', {
+      item_id: this.reasoningItem.id, output_index: idx, summary_index: 0, delta: text,
+    });
+  }
+
+  finishReasoning() {
+    if (!this.reasoningItem) return;
+    const item = this.reasoningItem;
+    const idx = this.output.indexOf(item);
+    const text = this.reasoningText || '';
+    this.send('response.reasoning_summary_text.done', { item_id: item.id, output_index: idx, summary_index: 0, text });
+    this.send('response.reasoning_summary_part.done', {
+      item_id: item.id, output_index: idx, summary_index: 0,
+      part: { type: 'summary_text', text },
+    });
+    item.summary = [{ type: 'summary_text', text }];
+    item.status = 'completed';
+    this.send('response.output_item.done', { output_index: idx, item });
+    this.reasoningItem = null;
   }
 
   flushText() {
@@ -534,6 +570,7 @@ class Emitter {
     }
     this.flushText();
     this.finishText();
+    this.finishReasoning();
     const resp = this.skeleton(status);
     resp.output = this.output.map(i => { const c = Object.assign({}, i); delete c.__text; return c; });
     resp.completed_at = Math.floor(Date.now() / 1000);
@@ -625,7 +662,7 @@ function chatStream(body, res, providerId) {
         const choice = obj.choices && obj.choices[0];
         if (!choice) continue;
         const d = choice.delta || {};
-        if (d.reasoning_content) em.reasoningText += d.reasoning_content;
+        if (d.reasoning_content) { em.reasoningText += d.reasoning_content; em.reasoningDelta(d.reasoning_content); }
         if (d.content) em.textDelta(d.content);
         if (Array.isArray(d.tool_calls)) {
           for (const tc of d.tool_calls) {
