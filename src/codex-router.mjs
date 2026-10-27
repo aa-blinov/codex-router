@@ -20,7 +20,32 @@ const LOG_DIR = path.join(HERE, 'logs');
 const ROUTE_LOG = path.join(LOG_DIR, 'routes.jsonl');
 const IS_WIN = process.platform === 'win32';
 const INLINE_MARKER = '<]minimax[>[';
-const ROUTER_VERSION = '1.2.8';
+const ROUTER_VERSION = '1.2.9';
+const CALIB_PATH = path.join(HERE, 'token-calibration.json');
+let tokenCalibration = {};
+try { tokenCalibration = JSON.parse(fs.readFileSync(CALIB_PATH, 'utf8')) || {}; } catch { tokenCalibration = {}; }
+
+function charsPerToken(model) {
+  const v = tokenCalibration[model];
+  if (typeof v === 'number' && v > 0.5 && v < 20) return v;
+  const name = String(model || '').toLowerCase();
+  if (name.startsWith('minimax')) return 3.0;
+  if (name.startsWith('deepseek')) return 2.6;
+  return 3.4;
+}
+
+function saveTokenCalibration() {
+  try { fs.writeFileSync(CALIB_PATH, JSON.stringify(tokenCalibration, null, 2)); } catch {}
+}
+
+function observeTokens(model, chars, tokens) {
+  if (!model || !chars || !tokens || tokens < 50) return;
+  const ratio = chars / tokens;
+  if (!(ratio > 0.5 && ratio < 20)) return;
+  const prev = charsPerToken(model);
+  tokenCalibration[model] = Number((prev * 0.5 + ratio * 0.5).toFixed(4));
+  saveTokenCalibration();
+}
 const reasoningByCall = new Map();
 const REASONING_LIMIT = 500;
 
@@ -581,18 +606,18 @@ class Emitter {
   }
 }
 
-function estimateTokens(obj) {
-  return Math.ceil(JSON.stringify(obj).length / 3.2);
+function estimateTokens(obj, model) {
+  return Math.ceil(JSON.stringify(obj).length / charsPerToken(model));
 }
 
-function trimToEstimate(req, targetTokens) {
+function trimToEstimate(req, targetTokens, model) {
   const systems = req.messages.filter(m => m.role === 'system');
   const rest = req.messages.filter(m => m.role !== 'system');
   const target = Math.max(1500, Math.floor(targetTokens));
   let guard = 0;
   while (rest.length > 1 && guard++ < 500) {
     const candidate = Object.assign({}, req, { messages: systems.concat(rest) });
-    if (estimateTokens(candidate) <= target) break;
+    if (estimateTokens(candidate, model) <= target) break;
     rest.shift();
   }
   return Object.assign({}, req, { messages: systems.concat(rest) });
@@ -650,17 +675,19 @@ function chatStream(body, res, providerId) {
             attempt++;
             const limit = Number(ctx[1]) || 1000000;
             const requested = asked ? Number(asked[1]) : null;
-            const currentEstimate = estimateTokens(reqBody);
+            const chars = JSON.stringify(reqBody).length;
+            if (requested) observeTokens(model, chars, requested);
+            const currentEstimate = estimateTokens(reqBody, model);
             // во сколько раз реальный запрос больше лимита — во столько же режем нашу оценку
             const ratio = requested && requested > 0 ? (limit * 0.8) / requested : (limit * 0.8) / currentEstimate;
             const target = Math.floor(currentEstimate * Math.min(ratio, 0.9));
-            const trimmed = trimToEstimate(reqBody, target);
+            const trimmed = trimToEstimate(reqBody, target, model);
             log({
               t: new Date().toISOString(), model, upstream: upstreamModel, target: providerId,
               status: 400, contextTrim: true, attempt,
               requestedTokens: requested, limitTokens: limit,
               messagesBefore: reqBody.messages.length, messagesAfter: trimmed.messages.length,
-              estimatedBefore: currentEstimate, estimatedAfter: estimateTokens(trimmed), ms: Date.now() - started,
+              estimatedBefore: currentEstimate, estimatedAfter: estimateTokens(trimmed, model), charsPerToken: Number(charsPerToken(model).toFixed(3)), ms: Date.now() - started,
             });
             attemptSend(trimmed);
             return;
@@ -687,6 +714,7 @@ function chatStream(body, res, providerId) {
           if (data === '[DONE]') continue;
           let obj;
           try { obj = JSON.parse(data); } catch { continue; }
+          if (obj.usage && obj.usage.prompt_tokens) observeTokens(model, JSON.stringify(reqBody).length, obj.usage.prompt_tokens);
           if (obj.usage) {
             em.usage = {
               input_tokens: obj.usage.prompt_tokens ?? 0,

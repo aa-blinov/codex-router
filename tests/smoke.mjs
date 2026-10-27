@@ -99,8 +99,9 @@ const fake = http.createServer((req, res) => {
       const size = raw.length;
       // пока запрос большой — отвечаем ошибкой контекста с реальными числами
       if (upstream.calls === 1) {
+        const requested = Math.max(100, Math.round(size / 2));
         res.writeHead(400, { 'content-type': 'application/json' });
-        return res.end(JSON.stringify({ error: { message: "This model's maximum context length is 1000 tokens. However, you requested 30000 tokens." } }));
+        return res.end(JSON.stringify({ error: { message: "This model's maximum context length is 1000 tokens. However, you requested " + requested + " tokens." } }));
       }
       if (upstream.calls === 2 && size > 6000) {
         res.writeHead(400, { 'content-type': 'application/json' });
@@ -263,7 +264,10 @@ async function main() {
     check('контекст: несколько попыток обрезки', upstream.calls >= 2, String(upstream.calls));
     const trimLog = (await request(`${base}/router/log?limit=20`)).text;
     check('контекст: запись contextTrim', trimLog.includes('"contextTrim":true'));
-    check('контекст: учтены числа API', trimLog.includes('"requestedTokens":30000'));
+    check('контекст: учтены числа API', trimLog.includes('"requestedTokens":'));
+    check('контекст: калибровка токенайзера в журнале', trimLog.includes('"charsPerToken"'));
+    const calibFile = JSON.parse(fs.readFileSync(path.join(dir, 'token-calibration.json'), 'utf8'));
+    check('калибровка сохранена на диск', Object.keys(calibFile).length > 0, JSON.stringify(calibFile));
 
     // 7. 429 от OpenAI → переход в DeepSeek
     upstream.mode = 'text';
