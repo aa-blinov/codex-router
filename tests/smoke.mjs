@@ -96,9 +96,15 @@ const fake = http.createServer((req, res) => {
 
     if (upstream.mode === 'context') {
       upstream.calls++;
+      const size = raw.length;
+      // пока запрос большой — отвечаем ошибкой контекста с реальными числами
       if (upstream.calls === 1) {
         res.writeHead(400, { 'content-type': 'application/json' });
-        return res.end(JSON.stringify({ error: { message: 'This model\'s maximum context length is 1000 tokens. However, you requested 5000 tokens.' } }));
+        return res.end(JSON.stringify({ error: { message: "This model's maximum context length is 1000 tokens. However, you requested 30000 tokens." } }));
+      }
+      if (upstream.calls === 2 && size > 6000) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ error: { message: "This model's maximum context length is 1000 tokens. However, you requested 2400 tokens." } }));
       }
       return sse(res, [chunk({ role: 'assistant', content: '' }), chunk({ content: 'trimmed' }), chunk({}, 'stop')]);
     }
@@ -254,9 +260,10 @@ async function main() {
     longInput.push({ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'go' }] });
     const trimmed = await post({ model: 'deepseek-v4.1-flash', stream: true, input: longInput });
     check('контекст: повтор после обрезки', trimmed.text.includes('"delta":"trimmed"'), trimmed.text.slice(0, 160));
-    check('контекст: два обращения к провайдеру', upstream.calls === 2, String(upstream.calls));
-    const trimLog = (await request(`${base}/router/log?limit=10`)).text;
+    check('контекст: несколько попыток обрезки', upstream.calls >= 2, String(upstream.calls));
+    const trimLog = (await request(`${base}/router/log?limit=20`)).text;
     check('контекст: запись contextTrim', trimLog.includes('"contextTrim":true'));
+    check('контекст: учтены числа API', trimLog.includes('"requestedTokens":30000'));
 
     // 7. 429 от OpenAI → переход в DeepSeek
     upstream.mode = 'text';

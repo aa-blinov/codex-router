@@ -20,7 +20,7 @@ const LOG_DIR = path.join(HERE, 'logs');
 const ROUTE_LOG = path.join(LOG_DIR, 'routes.jsonl');
 const IS_WIN = process.platform === 'win32';
 const INLINE_MARKER = '<]minimax[>[';
-const ROUTER_VERSION = '1.2.7';
+const ROUTER_VERSION = '1.2.8';
 const reasoningByCall = new Map();
 const REASONING_LIMIT = 500;
 
@@ -585,12 +585,12 @@ function estimateTokens(obj) {
   return Math.ceil(JSON.stringify(obj).length / 3.2);
 }
 
-function trimForLimit(req, limitTokens) {
+function trimToEstimate(req, targetTokens) {
   const systems = req.messages.filter(m => m.role === 'system');
   const rest = req.messages.filter(m => m.role !== 'system');
-  const target = Math.floor(limitTokens * 0.85);
+  const target = Math.max(1500, Math.floor(targetTokens));
   let guard = 0;
-  while (rest.length > 2 && guard++ < 500) {
+  while (rest.length > 1 && guard++ < 500) {
     const candidate = Object.assign({}, req, { messages: systems.concat(rest) });
     if (estimateTokens(candidate) <= target) break;
     rest.shift();
@@ -645,15 +645,22 @@ function chatStream(body, res, providerId) {
         r.on('end', () => {
           const text = Buffer.concat(chunks).toString('utf8').slice(0, 2000);
           const ctx = /maximum context length is (\d+) tokens/i.exec(text) || /context length is (\d+)/i.exec(text);
-          if (r.statusCode === 400 && ctx && attempt < 2) {
+          const asked = /you requested (\d+) tokens/i.exec(text);
+          if (r.statusCode === 400 && ctx && attempt < 3) {
             attempt++;
             const limit = Number(ctx[1]) || 1000000;
-            const trimmed = trimForLimit(reqBody, limit);
+            const requested = asked ? Number(asked[1]) : null;
+            const currentEstimate = estimateTokens(reqBody);
+            // во сколько раз реальный запрос больше лимита — во столько же режем нашу оценку
+            const ratio = requested && requested > 0 ? (limit * 0.8) / requested : (limit * 0.8) / currentEstimate;
+            const target = Math.floor(currentEstimate * Math.min(ratio, 0.9));
+            const trimmed = trimToEstimate(reqBody, target);
             log({
               t: new Date().toISOString(), model, upstream: upstreamModel, target: providerId,
               status: 400, contextTrim: true, attempt,
+              requestedTokens: requested, limitTokens: limit,
               messagesBefore: reqBody.messages.length, messagesAfter: trimmed.messages.length,
-              estimatedTokens: estimateTokens(trimmed), ms: Date.now() - started,
+              estimatedBefore: currentEstimate, estimatedAfter: estimateTokens(trimmed), ms: Date.now() - started,
             });
             attemptSend(trimmed);
             return;
