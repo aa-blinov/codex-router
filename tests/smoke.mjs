@@ -78,7 +78,7 @@ function chunk(delta, finish = null) {
 
 // ---------- фальшивый провайдер ----------
 
-const upstream = { mode: 'text', bodies: [], toolName: 'exec', calls: 0 };
+const upstream = { mode: 'text', bodies: [], toolName: 'exec', calls: 0, promptTokens: 10 };
 
 const fake = http.createServer((req, res) => {
   const chunks = [];
@@ -131,7 +131,7 @@ const fake = http.createServer((req, res) => {
       chunk({ role: 'assistant', content: '' }),
       chunk({ content: 'hello' }),
       chunk({}, 'stop'),
-      { id: 'x', object: 'chat.completion.chunk', choices: [], usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } },
+      { id: 'x', object: 'chat.completion.chunk', choices: [], usage: { prompt_tokens: upstream.promptTokens, completion_tokens: 2, total_tokens: upstream.promptTokens + 2 } },
     ]);
   });
 });
@@ -151,7 +151,7 @@ async function main() {
     port: routerPort,
     openai: { baseUrl: `http://127.0.0.1:${upstreamPort}`, prefix: '' },
     providers: {
-      deepseek: { baseUrl: `http://127.0.0.1:${upstreamPort}` },
+      deepseek: { baseUrl: `http://127.0.0.1:${upstreamPort}`, contextLimit: 1000 },
       minimax: { baseUrl: `http://127.0.0.1:${upstreamPort}` },
     },
   }));
@@ -268,6 +268,23 @@ async function main() {
     check('контекст: калибровка токенайзера в журнале', trimLog.includes('"charsPerToken"'));
     const calibFile = JSON.parse(fs.readFileSync(path.join(dir, 'token-calibration.json'), 'utf8'));
     check('калибровка сохранена на диск', Object.keys(calibFile).length > 0, JSON.stringify(calibFile));
+
+    // 6d. проактивная обрезка по usage прошлого ответа
+    upstream.mode = 'text';
+    upstream.promptTokens = 10;
+    await post({ model: 'deepseek-v4.1-flash', stream: true, input: msg('start') });
+    const statAfter = JSON.parse((await request(`${base}/health`)).text).usage['deepseek-v4.1-flash'];
+    check('usage: статистика записана', statAfter && statAfter.requests >= 1, JSON.stringify(statAfter));
+
+    // теперь «прошлый ответ» весил 900 токенов, история выросла — ждём обрезку до отправки
+    upstream.promptTokens = 900;
+    await post({ model: 'deepseek-v4.1-flash', stream: true, input: msg('second') });
+    upstream.bodies = [];
+    const bigInput = msg('third');
+    for (let i = 0; i < 12; i++) bigInput.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'x'.repeat(200) }] });
+    await post({ model: 'deepseek-v4.1-flash', stream: true, input: bigInput });
+    const proactiveLog = (await request(`${base}/router/log?limit=30`)).text;
+    check('контекст: проактивная обрезка', proactiveLog.includes('"proactiveTrim":true'));
 
     // 7. 429 от OpenAI → переход в DeepSeek
     upstream.mode = 'text';

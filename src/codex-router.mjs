@@ -20,7 +20,7 @@ const LOG_DIR = path.join(HERE, 'logs');
 const ROUTE_LOG = path.join(LOG_DIR, 'routes.jsonl');
 const IS_WIN = process.platform === 'win32';
 const INLINE_MARKER = '<]minimax[>[';
-const ROUTER_VERSION = '1.2.9';
+const ROUTER_VERSION = '1.3.0';
 const CALIB_PATH = path.join(HERE, 'token-calibration.json');
 let tokenCalibration = {};
 try { tokenCalibration = JSON.parse(fs.readFileSync(CALIB_PATH, 'utf8')) || {}; } catch { tokenCalibration = {}; }
@@ -32,6 +32,28 @@ function charsPerToken(model) {
   if (name.startsWith('minimax')) return 3.0;
   if (name.startsWith('deepseek')) return 2.6;
   return 3.4;
+}
+
+const STATS_PATH = path.join(HERE, 'usage-stats.json');
+let usageStats = {};
+try { usageStats = JSON.parse(fs.readFileSync(STATS_PATH, 'utf8')) || {}; } catch { usageStats = {}; }
+
+function saveUsageStats() {
+  try { fs.writeFileSync(STATS_PATH, JSON.stringify(usageStats, null, 2)); } catch {}
+}
+
+function recordUsage(model, usage, chars) {
+  if (!model || !usage) return;
+  const s = usageStats[model] || { requests: 0, inputTokens: 0, outputTokens: 0 };
+  s.requests += 1;
+  s.inputTokens += usage.input_tokens || 0;
+  s.outputTokens += usage.output_tokens || 0;
+  if (usage.input_tokens) {
+    s.lastPromptTokens = usage.input_tokens;
+    s.lastChars = chars;
+  }
+  usageStats[model] = s;
+  saveUsageStats();
 }
 
 function saveTokenCalibration() {
@@ -75,6 +97,7 @@ const DEFAULTS = {
   openai: { baseUrl: 'https://chatgpt.com', prefix: '/backend-api/codex' },
   providers: {
     deepseek: {
+      contextLimit: 1048576,
       baseUrl: 'https://api.deepseek.com',
       match: ['deepseek'],
       keyEnv: 'DEEPSEEK_API_KEY',
@@ -90,6 +113,7 @@ const DEFAULTS = {
       },
     },
     minimax: {
+      contextLimit: 1048576,
       baseUrl: 'https://api.minimax.io',
       match: ['minimax'],
       keyEnv: 'MINIMAX_API_KEY',
@@ -642,6 +666,35 @@ function chatStream(body, res, providerId) {
   const base = new URL(prov.baseUrl);
   const lib = base.protocol === 'https:' ? https : http;
   let attempt = 0;
+  let outbound = req;
+
+  // Провайдер сообщает точный размер контекста в usage прошлого ответа.
+  // Если история выросла, проецируем размер и режем заранее, не дожидаясь 400.
+  const limit = Number(prov.contextLimit || 1048576);
+  const stat = usageStats[model];
+  if (stat && stat.lastPromptTokens > 0 && stat.lastChars > 0) {
+    const chars = JSON.stringify(req).length;
+    const projected = Math.round(stat.lastPromptTokens * (chars / stat.lastChars));
+    if (projected > limit * 0.9) {
+      const targetChars = Math.floor(stat.lastChars * ((limit * 0.75) / stat.lastPromptTokens));
+      const systems = req.messages.filter(m => m.role === 'system');
+      const rest = req.messages.filter(m => m.role !== 'system');
+      let guard = 0;
+      while (rest.length > 1 && guard++ < 500) {
+        const candidate = Object.assign({}, req, { messages: systems.concat(rest) });
+        if (JSON.stringify(candidate).length <= targetChars) break;
+        rest.shift();
+      }
+      const trimmed = Object.assign({}, req, { messages: systems.concat(rest) });
+      log({
+        t: new Date().toISOString(), model, upstream: upstreamModel, target: providerId,
+        status: 0, proactiveTrim: true, limitTokens: limit,
+        lastPromptTokens: stat.lastPromptTokens, projectedTokens: projected,
+        messagesBefore: req.messages.length, messagesAfter: trimmed.messages.length,
+      });
+      outbound = trimmed;
+    }
+  }
 
   const attemptSend = (reqBody) => {
     const payload = Buffer.from(JSON.stringify(reqBody));
@@ -714,7 +767,10 @@ function chatStream(body, res, providerId) {
           if (data === '[DONE]') continue;
           let obj;
           try { obj = JSON.parse(data); } catch { continue; }
-          if (obj.usage && obj.usage.prompt_tokens) observeTokens(model, JSON.stringify(reqBody).length, obj.usage.prompt_tokens);
+          if (obj.usage && obj.usage.prompt_tokens) {
+            observeTokens(model, JSON.stringify(reqBody).length, obj.usage.prompt_tokens);
+            recordUsage(model, { input_tokens: obj.usage.prompt_tokens, output_tokens: obj.usage.completion_tokens || 0 }, JSON.stringify(reqBody).length);
+          }
           if (obj.usage) {
             em.usage = {
               input_tokens: obj.usage.prompt_tokens ?? 0,
@@ -756,7 +812,7 @@ function chatStream(body, res, providerId) {
     up.end(payload);
   };
 
-  attemptSend(req);
+  attemptSend(outbound);
 }
 
 // ---------- проброс в OpenAI ----------
@@ -821,7 +877,7 @@ http.createServer((req, res) => {
       };
     }
     return sendJson(res, 200, {
-      ok: true, name: 'codex-router', version: ROUTER_VERSION, platform: process.platform, tokenizer: tokenCalibration, secrets: { file: VAULT_PATH, kind: IS_WIN ? 'dpapi' : 'file-0600' }, port: cfg.port, providers,
+      ok: true, name: 'codex-router', version: ROUTER_VERSION, platform: process.platform, tokenizer: tokenCalibration, usage: usageStats, secrets: { file: VAULT_PATH, kind: IS_WIN ? 'dpapi' : 'file-0600' }, port: cfg.port, providers,
       openai: { base: cfg.openai.baseUrl + cfg.openai.prefix, auth: 'chatgpt passthrough' },
     });
   }
