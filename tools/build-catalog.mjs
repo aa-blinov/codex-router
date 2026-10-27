@@ -72,6 +72,7 @@ models.push(modelEntry({
   levels: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
   priority: 100,
   isDefault: true,
+  contextWindow: 850000,
 }));
 
 models.push(modelEntry({

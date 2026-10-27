@@ -78,7 +78,7 @@ function chunk(delta, finish = null) {
 
 // ---------- фальшивый провайдер ----------
 
-const upstream = { mode: 'text', bodies: [], toolName: 'exec' };
+const upstream = { mode: 'text', bodies: [], toolName: 'exec', calls: 0 };
 
 const fake = http.createServer((req, res) => {
   const chunks = [];
@@ -92,6 +92,15 @@ const fake = http.createServer((req, res) => {
     if (!req.url.includes('/chat/completions')) {
       res.writeHead(429, { 'content-type': 'application/json' });
       return res.end(JSON.stringify({ error: { message: 'usage limit reached' } }));
+    }
+
+    if (upstream.mode === 'context') {
+      upstream.calls++;
+      if (upstream.calls === 1) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ error: { message: 'This model\'s maximum context length is 1000 tokens. However, you requested 5000 tokens.' } }));
+      }
+      return sse(res, [chunk({ role: 'assistant', content: '' }), chunk({ content: 'trimmed' }), chunk({}, 'stop')]);
     }
 
     if (upstream.mode === 'inline') {
@@ -235,6 +244,19 @@ async function main() {
     check('inline: вызов разобран', inline.text.includes('"name":"exec_command"'), inline.text.slice(0, 200));
     check('inline: аргументы собраны', inline.text.includes('git status'));
     check('inline: маркер не утёк в текст', !inline.text.includes('minimax['));
+
+    // 6c. переполнение контекста: мост обрезает историю и повторяет запрос
+    upstream.mode = 'context';
+    upstream.calls = 0;
+    const filler = 'x'.repeat(400);
+    const longInput = [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: filler }] }];
+    for (let i = 0; i < 8; i++) longInput.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: filler }] });
+    longInput.push({ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'go' }] });
+    const trimmed = await post({ model: 'deepseek-v4.1-flash', stream: true, input: longInput });
+    check('контекст: повтор после обрезки', trimmed.text.includes('"delta":"trimmed"'), trimmed.text.slice(0, 160));
+    check('контекст: два обращения к провайдеру', upstream.calls === 2, String(upstream.calls));
+    const trimLog = (await request(`${base}/router/log?limit=10`)).text;
+    check('контекст: запись contextTrim', trimLog.includes('"contextTrim":true'));
 
     // 7. 429 от OpenAI → переход в DeepSeek
     upstream.mode = 'text';
